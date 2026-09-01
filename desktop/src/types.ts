@@ -23,7 +23,8 @@ export interface StreamSettings {
   sharpness: number;
   whiteBalanceMode: string;
   lowLatencyMode: boolean;
-  mirrorVideo: boolean;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
   antiFlicker: string;
 }
 

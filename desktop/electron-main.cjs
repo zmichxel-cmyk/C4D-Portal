@@ -185,6 +185,56 @@ function startUsbBridge() {
   usbServer.listen(USB_PORT, '127.0.0.1', () => console.log('usb: listening on 127.0.0.1:' + USB_PORT));
 }
 
+// Applied to what's actually pushed to the virtual camera (not just the
+// on-screen preview, which the renderer flips separately via canvas/CSS
+// transform — see PreviewPanel.tsx) so OBS/etc. see the flipped image too.
+// Set via the "Camera Flip (Horizontal/Vertical)" toggles in Settings.
+let flipHorizontal = false;
+let flipVertical = false;
+
+// Was doing one Buffer.copy() call PER PIXEL for horizontal flip — for a
+// 1280x720 frame that's ~920,000 tiny function calls every frame, which is
+// exactly what caused "extreme lag" whenever a flip toggle was on. Uint32
+// typed-array views (one BGRA pixel = one uint32) turn per-pixel swaps into
+// plain numeric array indexing, and the no-horizontal-flip row case uses a
+// single bulk TypedArray#set instead of a byte-by-byte copy — both are
+// close to native speed in V8.
+// Uint32Array requires its byteOffset into the backing buffer to be a
+// multiple of 4, which a Buffer's offset isn't guaranteed to be (pooled
+// Buffers in particular). Copy into a fresh, always-0-offset Uint8Array
+// when it isn't already aligned rather than risk a RangeError.
+function toAlignedUint32View(buf) {
+  if (buf.byteOffset % 4 === 0) {
+    return new Uint32Array(buf.buffer, buf.byteOffset, buf.length / 4);
+  }
+  const aligned = new Uint8Array(buf.length);
+  aligned.set(buf);
+  return new Uint32Array(aligned.buffer);
+}
+
+function flipBgraInPlace(bgra, width, height, flipH, flipV) {
+  if (!flipH && !flipV) return bgra;
+
+  const pixelCount = width * height;
+  const srcView = toAlignedUint32View(bgra);
+  const out = Buffer.alloc(bgra.length);
+  const dstView = toAlignedUint32View(out);
+
+  for (let y = 0; y < height; y++) {
+    const srcY = flipV ? height - 1 - y : y;
+    const srcRowStart = srcY * width;
+    const dstRowStart = y * width;
+    if (flipH) {
+      for (let x = 0; x < width; x++) {
+        dstView[dstRowStart + x] = srcView[srcRowStart + (width - 1 - x)];
+      }
+    } else {
+      dstView.set(srcView.subarray(srcRowStart, srcRowStart + width), dstRowStart);
+    }
+  }
+  return out;
+}
+
 let usbFrameCount = 0;
 function handleUsbJpegFrame(jpegBuffer) {
   try {
@@ -194,7 +244,7 @@ function handleUsbJpegFrame(jpegBuffer) {
       console.warn('usb: decoded frame has zero size, jpeg byte length was', jpegBuffer.length);
       return;
     }
-    const bgra = image.toBitmap();
+    const bgra = flipBgraInPlace(image.toBitmap(), width, height, flipHorizontal, flipVertical);
     virtualCamera?.pushFrame(bgra, width, height);
     mainWindow?.webContents.send('usb:frame', jpegBuffer, width, height);
     usbFrameCount += 1;
@@ -224,6 +274,20 @@ ipcMain.handle('usb:stop', () => {
   return true;
 });
 
+// Control channel reuses the same TCP connection as the frame stream —
+// TCP is full-duplex, so we can write commands to the phone on the same
+// socket it's streaming frames from. "SWITCH_CAMERA:<facing>\n" is
+// unambiguous next to the binary length-prefixed frame data because the
+// phone side only reads commands between frame sends, on its own dedicated
+// read loop — see UsbTransport.kt's `connect()`. The facing is explicit
+// (not a toggle) so it can't drift out of sync with the phone's actual
+// state if the phone's own on-device button gets used too.
+ipcMain.handle('usb:switch-camera', (_event, facing) => {
+  if (!usbSocket) return false;
+  usbSocket.write(`SWITCH_CAMERA:${facing}\n`);
+  return true;
+});
+
 // ── Virtual camera bridge ───────────────────────────────────────────────
 ipcMain.handle('camera:create', (_event, name) => {
   if (!virtualCamera) return { ok: false, error: 'native addon not loaded' };
@@ -247,6 +311,12 @@ ipcMain.handle('camera:start', () => {
 
 ipcMain.handle('camera:stop', () => {
   virtualCamera?.stop();
+  return true;
+});
+
+ipcMain.handle('camera:set-flip', (_event, h, v) => {
+  flipHorizontal = Boolean(h);
+  flipVertical = Boolean(v);
   return true;
 });
 

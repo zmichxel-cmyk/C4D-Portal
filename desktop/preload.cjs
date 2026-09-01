@@ -29,11 +29,13 @@ contextBridge.exposeInMainWorld('c4dportal', {
     start: () => ipcRenderer.invoke('camera:start'),
     stop: () => ipcRenderer.invoke('camera:stop'),
     pushFrame: (buffer, width, height) => ipcRenderer.send('camera:push-frame', buffer, width, height),
+    setFlip: (horizontal, vertical) => ipcRenderer.invoke('camera:set-flip', horizontal, vertical),
   },
 
   usb: {
     start: () => ipcRenderer.invoke('usb:start'),
     stop: () => ipcRenderer.invoke('usb:stop'),
+    switchCamera: (facing) => ipcRenderer.invoke('usb:switch-camera', facing),
     onPhoneConnected: (cb) => {
       const listener = () => cb();
       ipcRenderer.on('usb:phone-connected', listener);

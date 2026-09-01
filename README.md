@@ -169,17 +169,51 @@ button next to the front/rear camera switch — since the desktop's stream
 resolution is still fixed 16:9, portrait mode gets pillarboxed rather than
 filling the frame until per-orientation resolution negotiation exists.
 
+## Camera switch, flip, and USB latency (fixed after initial USB testing)
+
+Three more real bugs found once USB became the primary tested path:
+
+1. **Front/rear switch from the desktop was backwards / could drift.** The
+   Settings → CAMERA dropdown originally sent a blind "toggle" command —
+   correct only as long as the desktop's notion of "current camera" never
+   diverged from the phone's actual state (e.g. if the phone's own on-device
+   switch button got used independently, which it did during testing).
+   Changed the protocol to send an explicit target (`{"facing":"front"}` /
+   `SWITCH_CAMERA:front`) instead of a toggle, and `WifiTransport`/
+   `UsbTransport` now resolve that to the matching camera ID directly —
+   idempotent, can't drift regardless of prior state.
+2. **Flip toggles caused extreme lag.** `flipBgraInPlace` in
+   `electron-main.cjs` was calling `Buffer.copy()` once per pixel for a
+   horizontal flip — ~920,000 tiny function calls per 1280x720 frame.
+   Rewritten using `Uint32Array` views (one BGRA pixel = one uint32), which
+   turns per-pixel swaps into plain typed-array indexing: ~1.4ms per flip
+   at 1280x720 (tested in isolation), from something an order of magnitude
+   worse.
+3. **USB had real latency even with no flip.** An earlier "maximize quality"
+   pass had pushed `UsbTransport`'s capture resolution up to the sensor's
+   max (~3648x2736, ~10MP) — but the desktop's virtual camera output is a
+   fixed 1280x720, so every pixel beyond that was JPEG-encoded on-device,
+   sent over the USB tunnel, and JPEG-decoded on the desktop for nothing,
+   all of it downscaled away downstream anyway. Capture now targets
+   1280x720 directly (matching the actual output), with JPEG quality
+   dialed back from 97 to 90 for faster encode.
+
+"Camera Flip (Horizontal)" / "Camera Flip (Vertical)" are real now too —
+two toggles under Settings → Advanced (replacing the old non-functional
+"Mirror Video" toggle) that flip the actual pixels for both the on-screen
+preview and what's pushed to the virtual camera, on both transports.
+
 ## Known rough edges to revisit
 
-- Camera facing (and now orientation) can't be switched *while* streaming,
-  only before connecting.
 - Desktop pairing is a manual IP:port text field, not the QR/PIN flow from
   the mockup.
 - Front-camera CameraX preview (pre-stream monitor only) renders rotated
   90° — cosmetic, not yet investigated.
 - No audio track yet (video-only WebRTC stream).
-- WebRTC's default adaptive bitrate is conservative even on LAN, so video
-  can look softer than the phone's native quality — fixable by pinning a
-  higher target bitrate / disabling adaptive resolution scaling.
+- WebRTC's default adaptive bitrate is conservative even on LAN, so WiFi
+  video can look softer than the phone's native quality — fixable by
+  pinning a higher target bitrate / disabling adaptive resolution scaling
+  (already done for the WiFi sender's own encoder; worth revisiting if it's
+  still not enough).
 - Portrait streaming gets pillarboxed (see above) rather than the desktop
   stream adapting its own aspect ratio.

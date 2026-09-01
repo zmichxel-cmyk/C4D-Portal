@@ -6,7 +6,7 @@ import PairingPanel from './components/PairingPanel';
 import PreviewPanel from './components/PreviewPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { WebrtcReceiver } from './lib/webrtcReceiver';
-import { ConnectionStatus, ConnectionType, DeviceInfo, StreamSettings, StreamStats } from './types';
+import { CameraFacing, ConnectionStatus, ConnectionType, DeviceInfo, StreamSettings, StreamStats } from './types';
 
 const DEFAULT_SETTINGS: StreamSettings = {
   cameraFacing: 'rear',
@@ -20,7 +20,8 @@ const DEFAULT_SETTINGS: StreamSettings = {
   sharpness: 40,
   whiteBalanceMode: 'Auto',
   lowLatencyMode: true,
-  mirrorVideo: false,
+  flipHorizontal: false,
+  flipVertical: false,
   antiFlicker: '60Hz',
 };
 
@@ -54,6 +55,11 @@ export default function App() {
   const receiverRef = useRef<WebrtcReceiver | null>(null);
   const pushIntervalRef = useRef<number | null>(null);
   const usbUnsubscribersRef = useRef<Array<() => void>>([]);
+  // Read inside the push-frame interval instead of depending on `settings`
+  // directly, so toggling flip mid-stream doesn't restart the interval
+  // (which would introduce a stutter) — just changes what the next tick draws.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const stopPushLoop = useCallback(() => {
     if (pushIntervalRef.current !== null) {
@@ -65,7 +71,8 @@ export default function App() {
   const startPushLoop = useCallback((receiver: WebrtcReceiver) => {
     stopPushLoop();
     pushIntervalRef.current = window.setInterval(() => {
-      const frame = receiver.captureBgraFrame();
+      const { flipHorizontal, flipVertical } = settingsRef.current;
+      const frame = receiver.captureBgraFrame(flipHorizontal, flipVertical);
       if (frame) {
         window.c4dportal.camera.pushFrame(frame.data, frame.width, frame.height);
       }
@@ -162,6 +169,21 @@ export default function App() {
   };
 
   const handleSettingChange = <K extends keyof StreamSettings>(key: K, value: StreamSettings[K]) => {
+    // The CAMERA dropdown is the real front/rear switch control — picking a
+    // different option actually tells the phone to switch, same command
+    // either transport understands (see docs/protocol.md).
+    if (key === 'cameraFacing' && value !== settings.cameraFacing && status === 'connected') {
+      const facing = value as CameraFacing;
+      if (connectionType === 'wifi') {
+        void window.c4dportal.signaling.sendToPhone({ type: 'switch-camera', facing });
+      } else {
+        void window.c4dportal.usb.switchCamera(facing);
+      }
+    }
+    if (key === 'flipHorizontal' || key === 'flipVertical') {
+      const next = { ...settings, [key]: value };
+      void window.c4dportal.camera.setFlip(next.flipHorizontal, next.flipVertical);
+    }
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 

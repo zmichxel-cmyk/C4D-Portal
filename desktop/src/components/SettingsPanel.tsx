@@ -82,7 +82,8 @@ export default function SettingsPanel({ settings, onChange }: Props) {
 
       <h3 className="panel-subtitle">ADVANCED</h3>
       <Toggle label="Low Latency Mode" checked={settings.lowLatencyMode} onChange={(v) => onChange('lowLatencyMode', v)} />
-      <Toggle label="Mirror Video" checked={settings.mirrorVideo} onChange={(v) => onChange('mirrorVideo', v)} />
+      <Toggle label="Camera Flip (Horizontal)" checked={settings.flipHorizontal} onChange={(v) => onChange('flipHorizontal', v)} />
+      <Toggle label="Camera Flip (Vertical)" checked={settings.flipVertical} onChange={(v) => onChange('flipVertical', v)} />
       <Select label="Anti-Flicker" value={settings.antiFlicker} onChange={(v) => onChange('antiFlicker', v)}
         options={['Off', '50Hz', '60Hz']} />
     </aside>

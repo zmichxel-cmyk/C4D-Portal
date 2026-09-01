@@ -5,10 +5,13 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
@@ -18,7 +21,7 @@ import java.net.Socket
 import java.util.concurrent.Executors
 
 private const val TAG = "C4DPortalUsb"
-private const val JPEG_QUALITY = 80
+private const val JPEG_QUALITY = 90
 
 /**
  * USB transport: no WebRTC/ICE needed here, since `adb reverse` (run from
@@ -38,9 +41,11 @@ class UsbTransport(
     private val lifecycleOwner: LifecycleOwner,
     private val cameraProvider: ProcessCameraProvider,
     private val previewSurfaceProvider: Preview.SurfaceProvider,
-    private val lensFacing: Int,
+    initialLensFacing: Int,
     private val port: Int,
 ) : Transport {
+
+    private var lensFacing = initialLensFacing
 
     private var socket: Socket? = null
     private var outputStream: OutputStream? = null
@@ -67,9 +72,20 @@ class UsbTransport(
                 ContextCompat.getMainExecutor(context).execute { bindCameraUseCases() }
                 onConnected()
 
-                // Blocks until the socket closes (e.g. desktop disconnects),
-                // so we notice even if no local action triggered disconnect().
-                sock.getInputStream().read()
+                // Blocks reading newline-delimited text commands from the
+                // desktop over the same connection frames go out on (TCP is
+                // full-duplex) — currently just "SWITCH_CAMERA". Also how we
+                // notice the desktop closing the connection (reader.readLine()
+                // returns null at EOF).
+                val reader = sock.getInputStream().bufferedReader()
+                var line: String?
+                while (true) {
+                    line = reader.readLine() ?: break
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("SWITCH_CAMERA:")) {
+                        switchCamera(trimmed.substringAfter(":"))
+                    }
+                }
                 if (connected) {
                     connected = false
                     onDisconnected("connection closed by desktop")
@@ -85,7 +101,24 @@ class UsbTransport(
 
     private fun bindCameraUseCases() {
         val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewSurfaceProvider) }
+
+        // Without an explicit resolution, ImageAnalysis defaults to a low
+        // analysis-oriented resolution (historically ~640x480) — that was
+        // the original quality bug. But requesting the sensor's max
+        // (~10MP/3648x2736, from an earlier "go as high as possible" pass)
+        // overshot badly: the desktop's virtual camera stream is a fixed
+        // 1280x720, so every pixel beyond that is JPEG-encoded here,
+        // transferred over USB, and JPEG-decoded on the desktop for
+        // nothing — pure added latency with zero quality benefit, since it
+        // all gets downscaled to 720p downstream anyway. Match the actual
+        // output resolution instead.
+        val resolutionSelector = ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+            )
+            .build()
         val analysis = ImageAnalysis.Builder()
+            .setResolutionSelector(resolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
         analysis.setAnalyzer(analyzerExecutor) { image -> onFrame(image) }
@@ -99,10 +132,22 @@ class UsbTransport(
         }
     }
 
+    override fun switchCamera(facing: String) {
+        val target = if (facing == "front") CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        if (target == lensFacing) return
+        lensFacing = target
+        ContextCompat.getMainExecutor(context).execute { bindCameraUseCases() }
+    }
+
+    private var loggedFrameCount = 0
+
     private fun onFrame(image: ImageProxy) {
         try {
             if (connected && image.format == ImageFormat.YUV_420_888) {
                 val jpeg = yuv420ToJpeg(image)
+                if (loggedFrameCount++ % 60 == 0) {
+                    Log.i(TAG, "captured ${image.width}x${image.height} -> jpeg ${jpeg.size} bytes")
+                }
                 sendEncodedFrame(jpeg, image.imageInfo.timestamp, true)
             }
         } finally {

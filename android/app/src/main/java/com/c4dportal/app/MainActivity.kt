@@ -195,7 +195,12 @@ class MainActivity : AppCompatActivity() {
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-        if (!isStreaming) bindPreview()
+        if (isStreaming) {
+            val facing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) "front" else "rear"
+            transport?.switchCamera(facing)
+        } else {
+            bindPreview()
+        }
     }
 
     private fun startCameraPreview() {

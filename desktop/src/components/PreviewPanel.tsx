@@ -61,7 +61,10 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
   }, [liveStream]);
 
   // USB frames arrive as JPEG bytes over IPC (see electron-main.cjs "USB
-  // transport") — decode and draw each one as it comes in.
+  // transport") — decode and draw each one as it comes in. Flip is applied
+  // here too so the preview matches what's actually pushed to the virtual
+  // camera (the push path in electron-main.cjs applies the same flip to
+  // the raw BGRA buffer before pushFrame).
   useEffect(() => {
     if (!usbFrame) return;
     const canvas = canvasRef.current;
@@ -77,14 +80,18 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
           canvas.width = bitmap.width;
           canvas.height = bitmap.height;
         }
+        ctx.save();
+        ctx.translate(settings.flipHorizontal ? canvas.width : 0, settings.flipVertical ? canvas.height : 0);
+        ctx.scale(settings.flipHorizontal ? -1 : 1, settings.flipVertical ? -1 : 1);
         ctx.drawImage(bitmap, 0, 0);
+        ctx.restore();
         bitmap.close();
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [usbFrame]);
+  }, [usbFrame, settings.flipHorizontal, settings.flipVertical]);
 
   return (
     <section className="preview-panel">
@@ -94,7 +101,16 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
         {status === 'connected' ? (
           <>
             {liveStream ? (
-              <video ref={videoRef} autoPlay muted playsInline className="preview-canvas" />
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="preview-canvas"
+                style={{
+                  transform: `scale(${settings.flipHorizontal ? -1 : 1}, ${settings.flipVertical ? -1 : 1})`,
+                }}
+              />
             ) : (
               <canvas ref={canvasRef} width={1280} height={720} className="preview-canvas" />
             )}

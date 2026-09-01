@@ -14,6 +14,7 @@ import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpParameters
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -51,6 +52,7 @@ class WifiTransport(
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var videoTrack: VideoTrack? = null
     private var wsClient: WebSocketClient? = null
+    private var cameraEnumerator: Camera2Enumerator? = null
 
     companion object {
         @Volatile private var factoryInitialized = false
@@ -79,6 +81,7 @@ class WifiTransport(
             .createPeerConnectionFactory()
 
         val cameraEnumerator = Camera2Enumerator(context)
+        this.cameraEnumerator = cameraEnumerator
         val cameraId = cameraEnumerator.deviceNames.firstOrNull {
             if (lensFacing == CameraLensFacing.FRONT) cameraEnumerator.isFrontFacing(it)
             else cameraEnumerator.isBackFacing(it)
@@ -142,7 +145,8 @@ class WifiTransport(
             return
         }
         peerConnection = pc
-        pc.addTrack(track, listOf("C4DPORTAL_STREAM"))
+        val sender = pc.addTrack(track, listOf("C4DPORTAL_STREAM"))
+        tuneEncodingForQuality(sender)
 
         val client = object : WebSocketClient(URI("ws://$host:$port/signal")) {
             override fun onOpen(handshakedata: ServerHandshake?) {
@@ -180,6 +184,7 @@ class WifiTransport(
                             ),
                         )
                     }
+                    "switch-camera" -> switchCamera(msg.optString("facing", "rear"))
                 }
             }
 
@@ -196,6 +201,26 @@ class WifiTransport(
         client.connect()
     }
 
+    // WebRTC's defaults are tuned for unpredictable internet connections —
+    // conservative starting bitrate and "prefer framerate" degradation
+    // (shrinks resolution before it'll drop bitrate further), which made
+    // phone-to-desktop-on-the-same-LAN video look noticeably softer than
+    // it needed to. There's no bandwidth-scarcity reason to hold back here,
+    // so pin a bitrate that comfortably covers 1280x720/30fps and tell it
+    // to protect resolution over framerate if it ever does need to adapt.
+    private fun tuneEncodingForQuality(sender: org.webrtc.RtpSender?) {
+        val s = sender ?: return
+        val params = s.parameters
+        if (params.encodings.isNotEmpty()) {
+            val encoding = params.encodings[0]
+            encoding.minBitrateBps = 2_000_000
+            encoding.maxBitrateBps = 6_000_000
+            encoding.maxFramerate = 30
+        }
+        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+        s.parameters = params
+    }
+
     private fun sendToDesktop(json: JSONObject) {
         wsClient?.send(json.toString())
     }
@@ -204,6 +229,30 @@ class WifiTransport(
         // Not used for the WebRTC path — WebRTC pulls frames straight from
         // the capturer/encoder pipeline above rather than through this
         // interface method (that's what the USB path uses instead).
+    }
+
+    // Camera2Capturer has its own built-in camera switch that swaps the
+    // active physical camera without tearing down the peer connection or
+    // track — much simpler than WifiTransport recreating its whole capture
+    // pipeline the way UsbTransport has to. Passing an explicit target
+    // camera ID (rather than the no-arg toggle overload) means this always
+    // lands on the requested camera regardless of whatever it was on before.
+    override fun switchCamera(facing: String) {
+        val enumerator = cameraEnumerator ?: return
+        val wantFront = facing == "front"
+        val targetId = enumerator.deviceNames.firstOrNull {
+            if (wantFront) enumerator.isFrontFacing(it) else enumerator.isBackFacing(it)
+        } ?: return
+
+        capturer?.switchCamera(object : org.webrtc.CameraVideoCapturer.CameraSwitchHandler {
+            override fun onCameraSwitchDone(isFrontCamera: Boolean) {
+                Log.i(TAG, "switched camera, isFrontCamera=$isFrontCamera")
+            }
+
+            override fun onCameraSwitchError(errorDescription: String?) {
+                Log.e(TAG, "switchCamera failed: $errorDescription")
+            }
+        }, targetId)
     }
 
     override fun disconnect() {

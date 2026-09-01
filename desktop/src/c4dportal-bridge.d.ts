@@ -1,10 +1,11 @@
 export interface SignalingMessage {
-  type: 'offer' | 'answer' | 'ice';
+  type: 'offer' | 'answer' | 'ice' | 'switch-camera';
   sdp?: string;
   candidate?: RTCIceCandidateInit;
+  facing?: 'rear' | 'front';
 }
 
-export interface CamlinkBridge {
+export interface C4DPortalBridge {
   platform: string;
   signaling: {
     start: () => Promise<boolean>;
@@ -19,10 +20,12 @@ export interface CamlinkBridge {
     start: () => Promise<{ ok: boolean; error?: string }>;
     stop: () => Promise<boolean>;
     pushFrame: (buffer: Uint8Array, width: number, height: number) => void;
+    setFlip: (horizontal: boolean, vertical: boolean) => Promise<boolean>;
   };
   usb: {
     start: () => Promise<boolean>;
     stop: () => Promise<boolean>;
+    switchCamera: (facing: 'rear' | 'front') => Promise<boolean>;
     onPhoneConnected: (cb: () => void) => () => void;
     onPhoneDisconnected: (cb: () => void) => () => void;
     onError: (cb: (message: string) => void) => () => void;
@@ -32,6 +35,6 @@ export interface CamlinkBridge {
 
 declare global {
   interface Window {
-    c4dportal: CamlinkBridge;
+    c4dportal: C4DPortalBridge;
   }
 }
