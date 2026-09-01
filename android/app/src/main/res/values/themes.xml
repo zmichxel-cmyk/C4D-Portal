@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.C4DPortal" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#EF3B3B</item>
+        <item name="colorPrimaryDark">#0A0E14</item>
+        <item name="colorAccent">#EF3B3B</item>
+        <item name="android:windowBackground">#0A0E14</item>
+    </style>
+</resources>

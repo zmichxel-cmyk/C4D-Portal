@@ -1,0 +1,46 @@
+{
+  "name": "c4dportal-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron-main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "electron": "electron electron-main.cjs",
+    "electron:dev": "concurrently -k \"vite\" \"electron electron-main.cjs\"",
+    "electron:build": "npm run build && electron-builder",
+    "rebuild:native": "electron-rebuild -f -w c4dportal-virtual-camera"
+  },
+  "dependencies": {
+    "c4dportal-virtual-camera": "file:../native/virtual-camera",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.0.1",
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "build": {
+    "appId": "com.c4dportal.app",
+    "productName": "C4D Portal",
+    "win": {
+      "target": ["nsis"]
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs",
+      "preload.cjs"
+    ]
+  }
+}

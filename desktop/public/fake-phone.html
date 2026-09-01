@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /><title>C4D Portal fake phone (dev only)</title></head>
+<body style="background:#111;color:#eee;font-family:sans-serif;padding:16px">
+  <h2>Fake phone — WebRTC test harness</h2>
+  <p>Connects to ws://localhost:8787/signal, sends an offer with a webcam/synthetic video track. For desktop-pipeline testing only — the real Android app replaces this.</p>
+  <video id="local" autoplay muted playsinline width="320" style="background:#000;border:1px solid #444"></video>
+  <pre id="log" style="white-space:pre-wrap;background:#000;padding:8px;max-height:300px;overflow:auto"></pre>
+  <script>
+    const log = (...args) => {
+      console.log(...args);
+      document.getElementById('log').textContent += args.join(' ') + '\n';
+    };
+
+    async function main() {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        log('Using real webcam');
+      } catch (e) {
+        log('No webcam available, using synthetic canvas track:', e.message);
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 360;
+        const ctx = canvas.getContext('2d');
+        let hue = 0;
+        setInterval(() => {
+          ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = 'white';
+          ctx.font = '40px sans-serif';
+          ctx.fillText(new Date().toLocaleTimeString(), 20, 60);
+          hue = (hue + 3) % 360;
+        }, 66);
+        stream = canvas.captureStream(15);
+      }
+      document.getElementById('local').srcObject = stream;
+
+      const ws = new WebSocket('ws://localhost:8787/signal');
+      const pc = new RTCPeerConnection();
+      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) ws.send(JSON.stringify({ type: 'ice', candidate: e.candidate.toJSON() }));
+      };
+      pc.onconnectionstatechange = () => log('pc state:', pc.connectionState);
+
+      ws.onopen = async () => {
+        log('ws open, creating offer');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+      };
+      ws.onmessage = async (evt) => {
+        const msg = JSON.parse(evt.data);
+        log('ws message:', msg.type);
+        if (msg.type === 'answer') {
+          await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+        } else if (msg.type === 'ice' && msg.candidate) {
+          await pc.addIceCandidate(msg.candidate);
+        }
+      };
+      ws.onerror = (e) => log('ws error', e);
+      ws.onclose = () => log('ws closed');
+    }
+    main();
+  </script>
+</body>
+</html>
