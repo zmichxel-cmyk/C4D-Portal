@@ -4,8 +4,12 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.hardware.camera2.CaptureRequest
 import android.util.Log
+import android.util.Range
 import android.util.Size
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -117,10 +121,21 @@ class UsbTransport(
                 ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
             )
             .build()
-        val analysis = ImageAnalysis.Builder()
+        val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
+
+        // Motion blur on fast movement is exposure time, not our pipeline —
+        // in typical indoor lighting the camera's own auto-exposure will
+        // happily drop well below 30fps-equivalent shutter speed to keep
+        // the image bright, smearing anything moving. Pinning the AE target
+        // FPS range keeps exposure time capped at ~1/24s regardless of
+        // lighting; auto-ISO/gain compensates for brightness instead, at
+        // the cost of more visible noise in dim rooms. That trade is right
+        // for a "webcam" (motion clarity) rather than a stills camera.
+        applyFastShutterHint(analysisBuilder)
+
+        val analysis = analysisBuilder.build()
         analysis.setAnalyzer(analyzerExecutor) { image -> onFrame(image) }
 
         val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
@@ -129,6 +144,18 @@ class UsbTransport(
             cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, analysis)
         } catch (e: Exception) {
             Log.e(TAG, "bindCameraUseCases failed", e)
+        }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun applyFastShutterHint(builder: ImageAnalysis.Builder) {
+        try {
+            Camera2Interop.Extender(builder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(24, 30))
+        } catch (e: Exception) {
+            // Best-effort — not every device/camera combination honors this,
+            // and it must never be the reason the whole camera bind fails.
+            Log.w(TAG, "applyFastShutterHint failed, continuing without it", e)
         }
     }
 
