@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { buildCssFilter } from '../lib/imageAdjustments';
 import { ConnectionStatus, StreamSettings, StreamStats } from '../types';
 
 interface Props {
@@ -81,6 +82,7 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
           canvas.height = bitmap.height;
         }
         ctx.save();
+        ctx.filter = buildCssFilter(settings.brightness, settings.contrast, settings.saturation);
         ctx.translate(settings.flipHorizontal ? canvas.width : 0, settings.flipVertical ? canvas.height : 0);
         ctx.scale(settings.flipHorizontal ? -1 : 1, settings.flipVertical ? -1 : 1);
         ctx.drawImage(bitmap, 0, 0);
@@ -91,7 +93,7 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
     return () => {
       cancelled = true;
     };
-  }, [usbFrame, settings.flipHorizontal, settings.flipVertical]);
+  }, [usbFrame, settings.flipHorizontal, settings.flipVertical, settings.brightness, settings.contrast, settings.saturation]);
 
   return (
     <section className="preview-panel">
@@ -109,6 +111,7 @@ export default function PreviewPanel({ status, settings, stats, isPaused, liveSt
                 className="preview-canvas"
                 style={{
                   transform: `scale(${settings.flipHorizontal ? -1 : 1}, ${settings.flipVertical ? -1 : 1})`,
+                  filter: buildCssFilter(settings.brightness, settings.contrast, settings.saturation),
                 }}
               />
             ) : (

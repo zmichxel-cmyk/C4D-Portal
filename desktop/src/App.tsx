@@ -71,8 +71,8 @@ export default function App() {
   const startPushLoop = useCallback((receiver: WebrtcReceiver) => {
     stopPushLoop();
     pushIntervalRef.current = window.setInterval(() => {
-      const { flipHorizontal, flipVertical } = settingsRef.current;
-      const frame = receiver.captureBgraFrame(flipHorizontal, flipVertical);
+      const { flipHorizontal, flipVertical, brightness, contrast, saturation } = settingsRef.current;
+      const frame = receiver.captureBgraFrame(flipHorizontal, flipVertical, brightness, contrast, saturation);
       if (frame) {
         window.c4dportal.camera.pushFrame(frame.data, frame.width, frame.height);
       }
@@ -183,6 +183,10 @@ export default function App() {
     if (key === 'flipHorizontal' || key === 'flipVertical') {
       const next = { ...settings, [key]: value };
       void window.c4dportal.camera.setFlip(next.flipHorizontal, next.flipVertical);
+    }
+    if (key === 'brightness' || key === 'contrast' || key === 'saturation') {
+      const next = { ...settings, [key]: value };
+      void window.c4dportal.camera.setAdjustments(next.brightness, next.contrast, next.saturation);
     }
     setSettings((prev) => ({ ...prev, [key]: value }));
   };

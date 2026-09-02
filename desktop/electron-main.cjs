@@ -235,6 +235,55 @@ function flipBgraInPlace(bgra, width, height, flipH, flipV) {
   return out;
 }
 
+// Same 0-100 slider -> 0-200% mapping as desktop/src/lib/imageAdjustments.ts
+// (50 -> 100% / neutral) so USB and WiFi look identical for the same
+// slider position. 100/100/100 (i.e. sliders at 50/50/50) is the neutral
+// case and skips the per-pixel pass entirely.
+let adjustBrightnessPct = 100;
+let adjustContrastPct = 100;
+let adjustSaturationPct = 100;
+
+function clampByte(v) {
+  return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+function adjustBgraInPlace(bgra, brightnessPct, contrastPct, saturationPct) {
+  if (brightnessPct === 100 && contrastPct === 100 && saturationPct === 100) return bgra;
+
+  const brightnessFactor = brightnessPct / 100;
+  const contrastFactor = contrastPct / 100;
+  const saturationFactor = saturationPct / 100;
+  const out = Buffer.alloc(bgra.length);
+
+  for (let i = 0; i < bgra.length; i += 4) {
+    let b = bgra[i];
+    let g = bgra[i + 1];
+    let r = bgra[i + 2];
+
+    // Contrast around the mid-gray point, then brightness as a straight
+    // multiplier — same order most simple image editors use.
+    r = (r - 128) * contrastFactor + 128;
+    g = (g - 128) * contrastFactor + 128;
+    b = (b - 128) * contrastFactor + 128;
+    r *= brightnessFactor;
+    g *= brightnessFactor;
+    b *= brightnessFactor;
+
+    // Saturation: blend each channel toward (or away from) perceptual
+    // luma — the standard "lerp with grayscale" approach.
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    r = luma + (r - luma) * saturationFactor;
+    g = luma + (g - luma) * saturationFactor;
+    b = luma + (b - luma) * saturationFactor;
+
+    out[i] = clampByte(b);
+    out[i + 1] = clampByte(g);
+    out[i + 2] = clampByte(r);
+    out[i + 3] = bgra[i + 3];
+  }
+  return out;
+}
+
 let usbFrameCount = 0;
 function handleUsbJpegFrame(jpegBuffer) {
   try {
@@ -244,7 +293,8 @@ function handleUsbJpegFrame(jpegBuffer) {
       console.warn('usb: decoded frame has zero size, jpeg byte length was', jpegBuffer.length);
       return;
     }
-    const bgra = flipBgraInPlace(image.toBitmap(), width, height, flipHorizontal, flipVertical);
+    let bgra = adjustBgraInPlace(image.toBitmap(), adjustBrightnessPct, adjustContrastPct, adjustSaturationPct);
+    bgra = flipBgraInPlace(bgra, width, height, flipHorizontal, flipVertical);
     virtualCamera?.pushFrame(bgra, width, height);
     mainWindow?.webContents.send('usb:frame', jpegBuffer, width, height);
     usbFrameCount += 1;
@@ -317,6 +367,16 @@ ipcMain.handle('camera:stop', () => {
 ipcMain.handle('camera:set-flip', (_event, h, v) => {
   flipHorizontal = Boolean(h);
   flipVertical = Boolean(v);
+  return true;
+});
+
+// brightness/contrast/saturation arrive as raw 0-100 slider values —
+// convert to the 0-200% scale adjustBgraInPlace expects (matches
+// desktop/src/lib/imageAdjustments.ts's sliderToPercent).
+ipcMain.handle('camera:set-adjustments', (_event, brightness, contrast, saturation) => {
+  adjustBrightnessPct = Number(brightness) * 2;
+  adjustContrastPct = Number(contrast) * 2;
+  adjustSaturationPct = Number(saturation) * 2;
   return true;
 });
 

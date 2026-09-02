@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('c4dportal', {
     stop: () => ipcRenderer.invoke('camera:stop'),
     pushFrame: (buffer, width, height) => ipcRenderer.send('camera:push-frame', buffer, width, height),
     setFlip: (horizontal, vertical) => ipcRenderer.invoke('camera:set-flip', horizontal, vertical),
+    setAdjustments: (brightness, contrast, saturation) =>
+      ipcRenderer.invoke('camera:set-adjustments', brightness, contrast, saturation),
   },
 
   usb: {

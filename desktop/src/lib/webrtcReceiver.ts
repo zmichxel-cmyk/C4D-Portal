@@ -1,4 +1,5 @@
 import type { SignalingMessage } from '../c4dportal-bridge';
+import { buildCssFilter } from './imageAdjustments';
 
 export interface WebrtcReceiverCallbacks {
   onStream: (stream: MediaStream) => void;
@@ -104,7 +105,13 @@ export class WebrtcReceiver {
   // docs/protocol.md "Frame delivery to the virtual camera"). Canvas
   // ImageData is RGBA, so this swaps the R/B channels. Returns null if no
   // frame is available yet.
-  captureBgraFrame(flipHorizontal = false, flipVertical = false): CapturedFrame | null {
+  captureBgraFrame(
+    flipHorizontal = false,
+    flipVertical = false,
+    brightness = 50,
+    contrast = 50,
+    saturation = 50,
+  ): CapturedFrame | null {
     const { videoWidth, videoHeight } = this.captureVideo;
     if (videoWidth === 0 || videoHeight === 0) return null;
 
@@ -114,6 +121,7 @@ export class WebrtcReceiver {
     }
 
     this.captureCtx.save();
+    this.captureCtx.filter = buildCssFilter(brightness, contrast, saturation);
     this.captureCtx.translate(flipHorizontal ? videoWidth : 0, flipVertical ? videoHeight : 0);
     this.captureCtx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
     this.captureCtx.drawImage(this.captureVideo, 0, 0, videoWidth, videoHeight);

@@ -21,6 +21,7 @@ export interface C4DPortalBridge {
     stop: () => Promise<boolean>;
     pushFrame: (buffer: Uint8Array, width: number, height: number) => void;
     setFlip: (horizontal: boolean, vertical: boolean) => Promise<boolean>;
+    setAdjustments: (brightness: number, contrast: number, saturation: number) => Promise<boolean>;
   };
   usb: {
     start: () => Promise<boolean>;
